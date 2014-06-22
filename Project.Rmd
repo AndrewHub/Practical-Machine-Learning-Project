@@ -89,6 +89,9 @@ I use cross validation in the train control and set the partition number to 5 to
 ```{r rfFit, cache=TRUE}
 set.seed(8947)
 library(randomForest)
+# Try parallel in R
+library(parallel); library(foreach); library(doParallel)
+# setup parallel backend to use 4 processors
 cl<-makeCluster(4)
 registerDoParallel(cl)
 rfFit <- train(classe ~. , method = "rf", data = training, 
@@ -102,14 +105,10 @@ stopCluster(cl)
 ```{r rpartFit, cache=TRUE}
 set.seed(8964)
 library(rpart)
-# Try parallel in R
-library(parallel); library(foreach); library(doParallel)
-# setup parallel backend to use 4 processors
 cl<-makeCluster(4)
 registerDoParallel(cl)
 rpartFit <- train(classe ~. , method = "rpart", data = training, 
                   trControl = trainControl(method = "cv", number = 5))
-# close parallel computing in R
 stopCluster(cl)
 ```
 
