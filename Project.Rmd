@@ -1,0 +1,150 @@
+---
+title: "How Well Are You Doing Weight Lifting Exercises"
+author: "Yuantao Wang"
+date: "June 22, 2014"
+output: html_document
+---
+
+## Execution Summary
+
+The data is collected from sensors attached to 6 sujects while performing weight lifting exercises, with the purpose to evaluate how well (effectively) the subject perform each exercise. 
+
+In this short report, we use random forest method to produce a classifier (prediction model) to successfully classifies on 20 test samples. The random forest model has an out of sample error rate ~ 1%, and it way better than decision tree model (accuracy ~ 50%).
+
+## Getting Data
+Download the training and testing data sets from the web. Read them seperately into trainData and testData for further investigation.
+```{r getting_data, cache=TRUE}
+trainingURL <- 
+        "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testingURL <- 
+        "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+download.file(url = trainingURL, destfile = "pml-training.csv", method = "curl")
+download.file(url = testingURL, destfile = "pml-testing.csv", method = "curl")
+trainData <- read.csv("pml-training.csv", na.strings = c("NA", ""))
+testData <- read.csv("pml-testing.csv", na.strings = c("NA", ""))
+```
+
+## Cleaning Data
+
+### Notes
+
+* The only difference between trainData and testData is trainData has a column "classe" to label 5 incorrect curls exercises.
+
+* __All data cleaning should be applied to both trainData and testData to be consistant while doing prediction later on.__
+
+### Steps
+
+1. Notice that the first seven columns are time and index information, which are not of interest in building our machine learning model, so we should get rid of them.
+
+```{r first_7}
+head(trainData[, 1:7], 5)
+trainData <- trainData[, -c(1:7)]
+testData <- testData[, -c(1:7)]
+```
+
+2. Some variables have near zero variance, which have very little predictive values, so we should clear them out of the data sets. To do that, we need to load the caret package and use the nearZeroVar() function.
+
+```{r zeroVar}
+library(caret)
+nzv <- nearZeroVar(trainData[, -152])
+trainData <- trainData[, -nzv]
+testData <- testData[, -nzv]
+data.frame(dim(trainData), dim(testData))
+```
+
+3. Also notice that some columns have missing values, which are not helpful in building model, sometimes missing values may cuase problems while execute the prediction, we we should remove them.
+
+```{r missing_values}
+noNA <- colSums(is.na(trainData)) == 0
+trainData <- trainData[, noNA]
+testData <- testData[, noNA]
+data.frame(dim(trainData), dim(testData))
+```
+
+Now we get cleaned data sets with only 53 columns left, and we will build our model based on the 52 predictive varibles to predict on "classe".
+
+## Building Model
+
+I decided to choose two algorithms to build our model: decision trees and random forest, these two are popular in predicting categorical tasks like this one.
+
+### Data Splitting
+
+To fit the model, we split the trainData set into training (70%, to cross validation our model) and testing (30%, to get out of sample error rates). We left testData set unchanged for prediction purposes.
+
+```{r split}
+inTrain <- createDataPartition(trainData$classe, 
+                               p = 0.7, list = FALSE)
+training <- trainData[inTrain, ]
+testing <- trainData[-inTrain, ]
+```
+
+#### Notes
+
+* To save time compiling our codes, when fit our model we use parallel computing packages to have multiple "workers" (cores).
+
+### Random Forest
+
+I use cross validation in the train control and set the partition number to 5 to have less variance on the prediction model.
+
+```{r rfFit, cache=TRUE}
+set.seed(8947)
+library(randomForest)
+cl<-makeCluster(4)
+registerDoParallel(cl)
+rfFit <- train(classe ~. , method = "rf", data = training, 
+               trControl = trainControl(method = "cv", number = 5))
+# close parallel computing in R
+stopCluster(cl)
+```
+
+### Decision Trees
+
+```{r rpartFit, cache=TRUE}
+set.seed(8964)
+library(rpart)
+# Try parallel in R
+library(parallel); library(foreach); library(doParallel)
+# setup parallel backend to use 4 processors
+cl<-makeCluster(4)
+registerDoParallel(cl)
+rpartFit <- train(classe ~. , method = "rpart", data = training, 
+                  trControl = trainControl(method = "cv", number = 5))
+# close parallel computing in R
+stopCluster(cl)
+```
+
+### Estimating the models
+```{r estimate}
+rfPred <- predict(rfFit, newdata = testing)
+confusionMatrix(rfPred, testing$classe)
+rpartPred <- predict(rpartFit, newdata = testing)
+confusionMatrix(rpartPred, testing$classe)
+```
+
+To my surprise, the decision tree method works badly, with an accuracy of only 50%. However, the random forest model works pretty well in our seed(8947). The out of sample accuracy is ~ 99%, so we are expecting an error of ~ 1%. So 5 cross validation parts are enough for the model.
+
+## Predicting on Test set
+
+Get the prediction results with rfFit model on testData and write them into text files for submission part of this project.
+
+```{r predTest}
+answers <- predict(rfFit, newdata = testData)
+answers
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+pml_write_files(answers)
+```
+
+## Conclusion
+
+```{r}
+plot(rfFit)
+```
+
+
+We use 52 predictor variables to fit two models with 5 folds cross validation, the decision tree performs bad (accuracy ~ 50%), and the random forest performs perfectly (accuracy ~ 99%, out of sample error estimate ~ 1%). The random forest model also works well on the test set with 100% accuracy.
